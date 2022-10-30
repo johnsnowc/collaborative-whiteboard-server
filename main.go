@@ -1,74 +1,85 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 
-	socketio "github.com/googollee/go-socket.io"
-	"github.com/googollee/go-socket.io/engineio"
-	"github.com/googollee/go-socket.io/engineio/transport"
-	"github.com/googollee/go-socket.io/engineio/transport/polling"
-	"github.com/googollee/go-socket.io/engineio/transport/websocket"
+	gosocketio "github.com/graarh/golang-socketio"
+	"github.com/graarh/golang-socketio/transport"
+
+	"github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
 )
 
-// Easier to get running with CORS. Thanks for help @Vindexus and @erkie
-var allowOriginFunc = func(r *http.Request) bool {
-	return true
+var (
+	router *mux.Router
+	Server *gosocketio.Server
+)
+
+type Message struct {
+	Text string `json:"message"`
+}
+
+func LoadSocket() {
+	// socket connection
+	Server.On(gosocketio.OnConnection, func(c *gosocketio.Channel) {
+		log.Println("Connected", c.Id())
+		c.Join("Room")
+	})
+
+	// socket disconnection
+	Server.On(gosocketio.OnDisconnection, func(c *gosocketio.Channel) {
+		log.Println("Disconnected", c.Id())
+
+		// handles when someone closes the tab
+		c.Leave("Room")
+	})
+
+	// chat socket
+	Server.On("/chat", func(c *gosocketio.Channel, message Message) string {
+		log.Println(message.Text)
+		c.BroadcastTo("Room", "/message", message.Text)
+		return "message sent successfully."
+	})
+}
+
+func CreateRouter() {
+	router = mux.NewRouter()
+}
+
+func InititalizeRoutes() {
+	router.Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, Access-Control-Request-Headers, Access-Control-Request-Method, Connection, Host, Origin, User-Agent, Referer, Cache-Control, X-header")
+	})
+	router.Handle("/socket.io/", Server)
+}
+
+func StartServer() {
+	fmt.Println("Server Started at http://localhost:8000")
+	log.Fatal(http.ListenAndServe(":8000", handlers.CORS(handlers.AllowedHeaders([]string{"X-Requested-With", "Access-Control-Allow-Origin", "Content-Type", "Authorization"}), handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"}), handlers.AllowedOrigins([]string{"http://localhost:5173", "https://collaborative-whiteboard.netlify.app/"}), handlers.AllowCredentials())(router)))
+}
+
+func init() {
+	file := "./" + "log" + ".txt"
+	logFile, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0766)
+	if err != nil {
+		panic(err)
+	}
+	log.SetOutput(logFile) // 将文件设置为log输出的文件
+	log.SetPrefix("[whiteboard-server]")
+	log.SetFlags(log.LstdFlags | log.Lshortfile | log.LUTC)
+	Server = gosocketio.NewServer(transport.GetDefaultWebsocketTransport())
+	log.Println("Socket Inititalize...")
+	return
 }
 
 func main() {
-	server := socketio.NewServer(&engineio.Options{
-		Transports: []transport.Transport{
-			&polling.Transport{
-				CheckOrigin: allowOriginFunc,
-			},
-			&websocket.Transport{
-				CheckOrigin: allowOriginFunc,
-			},
-		},
-	})
-
-	server.OnConnect("/", func(s socketio.Conn) error {
-		s.SetContext("")
-		log.Println("connected:", s.ID())
-		return nil
-	})
-
-	server.OnEvent("/", "notice", func(s socketio.Conn, msg string) {
-		log.Println("notice:", msg)
-		s.Emit("reply", "have "+msg)
-	})
-
-	server.OnEvent("/chat", "msg", func(s socketio.Conn, msg string) string {
-		s.SetContext(msg)
-		return "recv " + msg
-	})
-
-	server.OnEvent("/", "bye", func(s socketio.Conn) string {
-		last := s.Context().(string)
-		s.Emit("bye", last)
-		s.Close()
-		return last
-	})
-
-	server.OnError("/", func(s socketio.Conn, e error) {
-		log.Println("meet error:", e)
-	})
-
-	server.OnDisconnect("/", func(s socketio.Conn, reason string) {
-		log.Println("closed", reason)
-	})
-
-	go func() {
-		if err := server.Serve(); err != nil {
-			log.Fatalf("socketio listen error: %s\n", err)
-		}
-	}()
-	defer server.Close()
-
-	http.Handle("/socket.io/", server)
-	http.Handle("/", http.FileServer(http.Dir("../asset")))
-
-	log.Println("Serving at localhost:8000...")
-	log.Fatal(http.ListenAndServe(":8000", nil))
+	LoadSocket()
+	CreateRouter()
+	InititalizeRoutes()
+	StartServer()
 }

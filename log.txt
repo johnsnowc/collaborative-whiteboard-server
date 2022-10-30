@@ -1,0 +1,15 @@
+[whiteboard-server]2022/10/30 08:23:06 main.go:76: Socket Inititalize...
+[whiteboard-server]2022/10/30 08:23:09 main.go:28: Connected Z_yeO1pARzxRkJsweK6X
+[whiteboard-server]2022/10/30 08:23:10 main.go:34: Disconnected Z_yeO1pARzxRkJsweK6X
+[whiteboard-server]2022/10/30 08:23:11 main.go:28: Connected QcGMX6SwFgEhbF-DNvtc
+[whiteboard-server]2022/10/30 08:23:27 main.go:28: Connected 8yXb1eSTkINLzC05K9PT
+[whiteboard-server]2022/10/30 08:35:09 main.go:76: Socket Inititalize...
+[whiteboard-server]2022/10/30 08:36:11 main.go:28: Connected _ZpBWenXhQwkPEEvfwj5
+[whiteboard-server]2022/10/30 08:36:27 main.go:28: Connected EXBnlOdvm8NZ7QdnOuPX
+[whiteboard-server]2022/10/30 08:36:29 main.go:34: Disconnected EXBnlOdvm8NZ7QdnOuPX
+[whiteboard-server]2022/10/30 08:36:30 main.go:28: Connected hmJMce4GEoMKYCJh09Bg
+[whiteboard-server]2022/10/30 08:40:06 main.go:34: Disconnected hmJMce4GEoMKYCJh09Bg
+[whiteboard-server]2022/10/30 08:40:15 main.go:34: Disconnected _ZpBWenXhQwkPEEvfwj5
+[whiteboard-server]2022/10/30 09:03:02 main.go:76: Socket Inititalize...
+[whiteboard-server]2022/10/30 09:03:45 main.go:28: Connected 3sZ7u7lJd_m1z2OO_ksE
+[whiteboard-server]2022/10/30 09:03:52 main.go:28: Connected 7gUd67z09-rhOcygOlA2
