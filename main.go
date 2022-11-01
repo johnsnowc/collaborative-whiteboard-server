@@ -1,69 +1,46 @@
 package main
 
 import (
-	"fmt"
+	"github.com/gin-gonic/gin"
+	"io"
 	"log"
 	"net/http"
 	"os"
-
-	gosocketio "github.com/graarh/golang-socketio"
-	"github.com/graarh/golang-socketio/transport"
-
-	"github.com/gorilla/handlers"
-	"github.com/gorilla/mux"
+	"sync"
 )
 
-var (
-	router *mux.Router
-	Server *gosocketio.Server
-)
+var house sync.Map
+var roomMutexes = make(map[string]*sync.Mutex)
+var mutexForRoomMutexes = new(sync.Mutex)
 
-type Message struct {
-	Text string `json:"message"`
-}
+func GinMiddleware(allowOrigins []string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		for i := 0; i < len(allowOrigins); i++ {
+			c.Writer.Header().Add("Access-Control-Allow-Origin", allowOrigins[i])
+		}
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Content-Length, X-CSRF-Token, Token, session, Origin, Host, Connection, Accept-Encoding, Accept-Language, X-Requested-With")
 
-func LoadSocket() {
-	// socket connection
-	Server.On(gosocketio.OnConnection, func(c *gosocketio.Channel) {
-		log.Println("Connected", c.Id())
-		c.Join("Room")
-	})
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
 
-	// socket disconnection
-	Server.On(gosocketio.OnDisconnection, func(c *gosocketio.Channel) {
-		log.Println("Disconnected", c.Id())
+		c.Request.Header.Del("Origin")
 
-		// handles when someone closes the tab
-		c.Leave("Room")
-	})
-
-	// chat socket
-	Server.On("/chat", func(c *gosocketio.Channel, message Message) string {
-		log.Println(message.Text)
-		c.BroadcastTo("Room", "/message", message.Text)
-		return "message sent successfully."
-	})
-}
-
-func CreateRouter() {
-	router = mux.NewRouter()
-}
-
-func InititalizeRoutes() {
-	router.Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, Access-Control-Request-Headers, Access-Control-Request-Method, Connection, Host, Origin, User-Agent, Referer, Cache-Control, X-header")
-	})
-	router.Handle("/socket.io/", Server)
-}
-
-func StartServer() {
-	fmt.Println("Server Started at http://localhost:8000")
-	log.Fatal(http.ListenAndServe(":8000", handlers.CORS(handlers.AllowedHeaders([]string{"X-Requested-With", "Access-Control-Allow-Origin", "Content-Type", "Authorization"}), handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"}), handlers.AllowedOrigins([]string{"http://localhost:5173", "https://collaborative-whiteboard.netlify.app/"}), handlers.AllowCredentials())(router)))
+		c.Next()
+	}
 }
 
 func init() {
+	// 禁用控制台颜色，将日志写入文件时不需要控制台颜色。
+	gin.DisableConsoleColor()
+
+	// 记录到文件。
+	f, _ := os.Create("gin.log")
+	gin.DefaultWriter = io.MultiWriter(f, os.Stdout)
+
 	file := "./" + "log" + ".txt"
 	logFile, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0766)
 	if err != nil {
@@ -71,15 +48,13 @@ func init() {
 	}
 	log.SetOutput(logFile) // 将文件设置为log输出的文件
 	log.SetPrefix("[whiteboard-server]")
-	log.SetFlags(log.LstdFlags | log.Lshortfile | log.LUTC)
-	Server = gosocketio.NewServer(transport.GetDefaultWebsocketTransport())
-	log.Println("Socket Inititalize...")
-	return
+	log.SetFlags(log.LstdFlags | log.Llongfile | log.Ldate | log.Ltime)
 }
 
 func main() {
-	LoadSocket()
-	CreateRouter()
-	InititalizeRoutes()
-	StartServer()
+	r := gin.Default()
+	r.Use(GinMiddleware([]string{"https://collaborative-whiteboard.netlify.app/"}))
+	r.GET("/:room", test)
+	r.GET("/ws/:room", room)
+	r.Run(":8000")
 }
