@@ -1,16 +1,11 @@
 package main
 
 type Hub struct {
-	// Identity of room.
-	roomId string
-
-	// Registered clients.
-	clients map[*Client]bool
-
-	// Inbound messages from the clients.
-	broadcast chan []byte
-
-	// Unregister requests from clients.
+	roomId     string
+	owner      string
+	readOnly   bool //房间模式，false代表协作模式，true代表只读模式，只有房主可以更改房间的模式，只读模式下只有房主可以操作白板
+	clients    map[*Client]bool
+	broadcast  chan []byte
 	unregister chan *Client
 }
 
@@ -31,35 +26,50 @@ func (h *Hub) run() {
 	for {
 		select {
 		case client := <-h.unregister:
-			roomMutex := roomMutexes[h.roomId]
-			roomMutex.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.send)
-				if len(h.clients) == 0 {
-					house.Delete(h.roomId)
-					roomMutex.Unlock()
-					mutexForRoomMutexes.Lock()
-					if roomMutex.TryLock() {
-						if len(h.clients) == 0 {
-							delete(roomMutexes, h.roomId)
-						}
-						roomMutex.Unlock()
-					}
-					mutexForRoomMutexes.Unlock()
-					return
-				}
-			}
-			roomMutex.Unlock()
+			h.OnDisconnect(client)
 		case message := <-h.broadcast:
-			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					delete(h.clients, client)
+			h.BroadcastToRoom(message)
+		}
+	}
+}
+
+func (h *Hub) OnDisconnect(client *Client) {
+	roomMutex := roomMutexes[h.roomId]
+	roomMutex.Lock()
+	if _, ok := h.clients[client]; ok {
+		delete(h.clients, client)
+		close(client.send)
+		//房间无人时从房间列表删去该房间
+		if len(h.clients) == 0 {
+			house.Delete(h.roomId)
+			roomMutex.Unlock()
+			mutexForRoomMutexes.Lock()
+			if roomMutex.TryLock() {
+				if len(h.clients) == 0 {
+					delete(roomMutexes, h.roomId)
 				}
+				roomMutex.Unlock()
 			}
+			mutexForRoomMutexes.Unlock()
+			return
+		}
+		//房间还剩一人时其自动成为房主
+		if len(h.clients) == 1 {
+			for c, _ := range h.clients {
+				h.owner = c.id
+			}
+		}
+	}
+	roomMutex.Unlock()
+}
+
+func (h *Hub) BroadcastToRoom(message []byte) {
+	for client := range h.clients {
+		select {
+		case client.send <- message:
+		default:
+			close(client.send)
+			delete(h.clients, client)
 		}
 	}
 }
