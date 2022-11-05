@@ -55,6 +55,8 @@ func main() {
 	r := gin.Default()
 	r.Use(GinMiddleware([]string{"https://collaborative-whiteboard.netlify.app/"}))
 	r.GET("/:room", test)
-	r.GET("/ws/:room", room)
+	r.GET("/id", getId)
+	r.GET("/room", getRoom)
+	r.GET("/ws/room/:roomId/user/:userId", roomHandler)
 	r.Run(":8000")
 }

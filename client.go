@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	uuid "github.com/satori/go.uuid"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -65,8 +65,13 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-		c.hub.broadcast <- message
+		log.Println(fmt.Sprintf("recv from id: %s ,message: %s", c.id, message))
+		message = bytes.TrimSpace(message)
+		//ws收发消息过快会合并消息，以换行符分割
+		messages := bytes.Split(message, newline)
+		for i := 0; i < len(messages); i++ {
+			c.hub.broadcast <- messages[i]
+		}
 	}
 }
 
@@ -117,17 +122,16 @@ func (c *Client) writePump() {
 }
 
 // serveWs handles websocket requests from the peer.
-func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+func serveWs(userid string, hub *Hub, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	id := uuid.NewV4().String()
-	client := &Client{id: id, hub: hub, conn: conn, send: make(chan []byte, 256)}
+	client := &Client{id: userid, hub: hub, conn: conn, send: make(chan []byte, 256)}
 	client.hub.clients[client] = true
 	if len(hub.clients) == 1 {
-		hub.owner = id
+		hub.owner = userid
 	}
 	roomMutexes[hub.roomId].Unlock()
 
