@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"collaborative-whiteboard-server/model"
 	"fmt"
+	jsoniter "github.com/json-iterator/go"
 	"log"
 	"net/http"
 	"time"
@@ -38,10 +40,11 @@ var upgrader = websocket.Upgrader{
 }
 
 type Client struct {
-	id   string
-	hub  *Hub
-	conn *websocket.Conn
-	send chan []byte
+	id    string
+	start time.Time
+	hub   *Hub
+	conn  *websocket.Conn
+	send  chan []byte
 }
 
 // readPump pumps messages from the websocket connection to the hub.
@@ -63,6 +66,7 @@ func (c *Client) readPump() {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("error: %v", err)
 			}
+			log.Println("err!=nil")
 			break
 		}
 		log.Println(fmt.Sprintf("recv from id: %s ,message: %s", c.id, message))
@@ -70,7 +74,15 @@ func (c *Client) readPump() {
 		//ws收发消息过快会合并消息，以换行符分割
 		messages := bytes.Split(message, newline)
 		for i := 0; i < len(messages); i++ {
-			c.hub.broadcast <- messages[i]
+			var ms model.Message
+			_ = jsoniter.Unmarshal(messages[i], &ms)
+			switch ms.Operation {
+			//case "keep-alive":
+			//	c.start = time.Now()
+			default:
+				c.hub.broadcast <- messages[i]
+			}
+
 		}
 	}
 }
@@ -82,7 +94,9 @@ func (c *Client) readPump() {
 // executing all writes from this goroutine.
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
+	//alive := time.NewTicker(time.Second * 5)
 	defer func() {
+		//alive.Stop()
 		ticker.Stop()
 		c.conn.Close()
 	}()
@@ -93,6 +107,7 @@ func (c *Client) writePump() {
 			if !ok {
 				// The hub closed the channel.
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				log.Println("c.conn.WriteMessage(websocket.CloseMessage, []byte{})")
 				return
 			}
 
@@ -110,6 +125,7 @@ func (c *Client) writePump() {
 			}
 
 			if err := w.Close(); err != nil {
+				log.Println("err := w.Close()")
 				return
 			}
 		case <-ticker.C:
@@ -117,22 +133,29 @@ func (c *Client) writePump() {
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
+			//case <-alive.C:
+			//	if !c.start.Add(time.Minute).After(time.Now()) {
+			//		log.Println("time out")
+			//		return
+			//	}
 		}
 	}
 }
 
 // serveWs handles websocket requests from the peer.
-func serveWs(userid string, hub *Hub, w http.ResponseWriter, r *http.Request) {
+func serveWs(roomId, userid string, hub *Hub, w http.ResponseWriter, r *http.Request) {
+	cli := model.Pool.Get()
+	defer cli.Close()
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	client := &Client{id: userid, hub: hub, conn: conn, send: make(chan []byte, 256)}
+	client := &Client{id: userid, start: time.Now(), hub: hub, conn: conn, send: make(chan []byte, 256)}
 	client.hub.clients[client] = true
-	if len(hub.clients) == 1 {
-		hub.owner = userid
-	}
+	owner, _ := cli.Do("GET", fmt.Sprintf("room:%s", roomId))
+	client.hub.owner = owner.(string)
 	roomMutexes[hub.roomId].Unlock()
 
 	// Allow collection of memory referenced by the caller by doing all work in

@@ -3,7 +3,7 @@ package main
 type Hub struct {
 	roomId     string
 	owner      string
-	readOnly   bool //房间模式，false代表协作模式，true代表只读模式，只有房主可以更改房间的模式，只读模式下所有人都不能操作白板
+	readOnly   bool //房间模式，false代表协作模式，true代表只读模式，只有房主可以更改房间的模式，只读模式下只有房主可以操作白板
 	clients    map[*Client]bool
 	broadcast  chan []byte
 	unregister chan *Client
@@ -55,6 +55,21 @@ func (h *Hub) OnDisconnect(client *Client) {
 			return
 		}
 
+		//房间还剩一人时其自动成为房主
+		if len(h.clients) == 1 {
+			for c, _ := range h.clients {
+				h.owner = c.id
+			}
+			return
+		}
+
+		//房主离开时房间里的人自动成为房主
+		if client.id == h.owner {
+			for c, _ := range h.clients {
+				h.owner = c.id
+				break
+			}
+		}
 	}
 	roomMutex.Unlock()
 }
