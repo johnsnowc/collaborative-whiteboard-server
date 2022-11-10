@@ -57,17 +57,20 @@ func main() {
 	model.Pool = model.PoolInitRedis("127.0.0.1:6379", "")
 
 	r := gin.Default()
-	r.Use(GinMiddleware([]string{"https://collaborative-whiteboard.netlify.app/"}))
+	r.Use(GinMiddleware([]string{"*"}))
 	r.GET("/test/:room", test)
 
 	r.POST("/register", Register)
 	r.POST("/login", Login)
+	r.GET("/ws/room/:roomId/user/:userId", RoomHandler)
 	auth := r.Group("/auth")
 	auth.Use(middleware.Auth())
 	{
 		auth.GET("/getUserInfo", GetUserInfo)
 		auth.GET("/room", CreateRoom)
-		auth.GET("/ws/room/:roomId/", RoomHandler)
+		auth.GET("/room/:roomId", IsRoomExist)
+		auth.DELETE("/room/:roomId", DeleteRoom)
+		//auth.GET("/ws/room/:roomId/", RoomHandler)
 	}
 
 	r.Run(":8000")

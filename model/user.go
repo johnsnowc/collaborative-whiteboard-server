@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"github.com/gomodule/redigo/redis"
+	uuid "github.com/satori/go.uuid"
 	"log"
 )
 
@@ -49,5 +50,8 @@ func Register(loginRequestBody LoginRequestBody) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	id := uuid.NewV4()
+	cli.Do("Set", fmt.Sprintf("user:%s:id", loginRequestBody.Username), id)
+	cli.Do("Set", fmt.Sprintf("id:%s:user", id), loginRequestBody.Username)
 	return true, nil
 }

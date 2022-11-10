@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"collaborative-whiteboard-server/model"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	jsoniter "github.com/json-iterator/go"
 	"log"
 	"net/http"
@@ -118,11 +119,11 @@ func (c *Client) writePump() {
 			w.Write(message)
 
 			// Add queued chat messages to the current websocket message.
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				w.Write(newline)
-				w.Write(<-c.send)
-			}
+			//n := len(c.send)
+			//for i := 0; i < n; i++ {
+			//	w.Write(newline)
+			//	w.Write(<-c.send)
+			//}
 
 			if err := w.Close(); err != nil {
 				log.Println("err := w.Close()")
@@ -143,11 +144,11 @@ func (c *Client) writePump() {
 }
 
 // serveWs handles websocket requests from the peer.
-func serveWs(roomId, userid string, hub *Hub, w http.ResponseWriter, r *http.Request) {
+func serveWs(roomId, userid string, hub *Hub, c *gin.Context) {
 	cli := model.Pool.Get()
 	defer cli.Close()
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Println(err)
 		return
@@ -155,7 +156,16 @@ func serveWs(roomId, userid string, hub *Hub, w http.ResponseWriter, r *http.Req
 	client := &Client{id: userid, start: time.Now(), hub: hub, conn: conn, send: make(chan []byte, 256)}
 	client.hub.clients[client] = true
 	owner, _ := cli.Do("GET", fmt.Sprintf("room:%s", roomId))
-	client.hub.owner = owner.(string)
+	if owner == nil {
+		c.JSON(500, HttpMessage{
+			Code:    "-1",
+			Message: "This Room is not Created!",
+			Data:    nil,
+		})
+		return
+	}
+	log.Println(fmt.Sprintf("room %s owner %s", roomId, string(owner.([]byte))))
+	client.hub.owner = string(owner.([]byte))
 	roomMutexes[hub.roomId].Unlock()
 
 	// Allow collection of memory referenced by the caller by doing all work in

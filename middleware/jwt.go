@@ -8,15 +8,22 @@ import (
 	"net/http"
 )
 
+type HttpMessage struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data"`
+}
+
 // Auth middleware, check the token
 func Auth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Get the token in the request context
 		token := c.Request.Header.Get("token")
 		if token == "" {
-			c.JSON(http.StatusOK, gin.H{
-				"status": -1,
-				"msg":    "No token, illegal access",
+			c.JSON(http.StatusOK, HttpMessage{
+				Code:    "-1",
+				Message: "No token, illegal access",
+				Data:    nil,
 			})
 			c.Abort()
 			return
@@ -26,16 +33,18 @@ func Auth() gin.HandlerFunc {
 		claims, err := jwt.ParseToken(token)
 		if err != nil {
 			if err == TokenExpired {
-				c.JSON(http.StatusOK, gin.H{
-					"status": -1,
-					"msg":    "Authorization expired",
+				c.JSON(http.StatusOK, HttpMessage{
+					Code:    "-1",
+					Message: "Authorization expired",
+					Data:    nil,
 				})
 				c.Abort()
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{
-				"status": -1,
-				"msg":    err.Error(),
+			c.JSON(http.StatusOK, HttpMessage{
+				Code:    "-1",
+				Message: err.Error(),
+				Data:    nil,
 			})
 			c.Abort()
 			return
@@ -70,7 +79,6 @@ func GetSignKey() string {
 	return SignKey
 }
 
-//
 func SetSignKey(key string) string {
 	SignKey = key
 	return SignKey
