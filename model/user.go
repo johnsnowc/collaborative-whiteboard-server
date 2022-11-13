@@ -28,9 +28,9 @@ func Login(loginRequestBody LoginRequestBody) (bool, error) {
 		err = fmt.Errorf("The user does not exist ")
 		return false, err
 	}
-	password, err := cli.Do("Get", fmt.Sprintf("user:%s", loginRequestBody.Username))
-	log.Println(string(password.([]byte)))
-	if string(password.([]byte)) != loginRequestBody.Password {
+	password, err := redis.String(cli.Do("Get", fmt.Sprintf("user:%s", loginRequestBody.Username)))
+	log.Println(password)
+	if password != loginRequestBody.Password {
 		err = fmt.Errorf("Password mistake ")
 		return false, err
 	}

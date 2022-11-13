@@ -67,8 +67,10 @@ func main() {
 	auth.Use(middleware.Auth())
 	{
 		auth.GET("/getUserInfo", GetUserInfo)
-		auth.GET("/room", CreateRoom)
+		auth.POST("/room", CreateRoom)
+		auth.GET("/rooms", GetRooms)
 		auth.GET("/room/:roomId", IsRoomExist)
+		auth.GET("/room/:roomId/isOwner", IsOwner)
 		auth.DELETE("/room/:roomId", DeleteRoom)
 		//auth.GET("/ws/room/:roomId/", RoomHandler)
 	}

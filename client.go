@@ -5,9 +5,12 @@ import (
 	"collaborative-whiteboard-server/model"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"github.com/gomodule/redigo/redis"
 	jsoniter "github.com/json-iterator/go"
 	"log"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -15,16 +18,16 @@ import (
 
 const (
 	// Time allowed to write a message to the peer.
-	writeWait = 10 * time.Second
+	writeWait = 5 * time.Second
 
 	// Time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
+	pongWait = 30 * time.Second
 
 	// Send pings to peer with this period. Must be less than pongWait.
 	pingPeriod = (pongWait * 9) / 10
 
 	// Maximum message size allowed from peer.
-	maxMessageSize = 512
+	maxMessageSize = 1024
 )
 
 var (
@@ -65,9 +68,9 @@ func (c *Client) readPump() {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
+				//log.Printf("error: %v", err)
 			}
-			log.Println("err!=nil")
+			//log.Println("err", err)
 			break
 		}
 		log.Println(fmt.Sprintf("recv from id: %s ,message: %s", c.id, message))
@@ -75,17 +78,56 @@ func (c *Client) readPump() {
 		//ws收发消息过快会合并消息，以换行符分割
 		messages := bytes.Split(message, newline)
 		for i := 0; i < len(messages); i++ {
+
+			newMaxNum := atomic.AddInt64(&c.hub.OpMaxNum, 1)
+			var newCurrentNum int64
+			if newMaxNum > 0 && newMaxNum%300 == 0 {
+				exportMessage := model.Message{
+					RoomId:    c.hub.roomId,
+					UserId:    c.id,
+					Operation: "export",
+					Data:      nil,
+				}
+				message1, _ := jsoniter.Marshal(exportMessage)
+				c.writeMessage(message1)
+
+				newCurrentNum = atomic.AddInt64(&c.hub.OpCurrentNum, 300)
+			}
+
 			var ms model.Message
 			_ = jsoniter.Unmarshal(messages[i], &ms)
 			switch ms.Operation {
+			case "export":
+				go export(newCurrentNum, c.hub.roomId, ms)
 			//case "keep-alive":
 			//	c.start = time.Now()
+			case "join":
+				c.hub.broadcast <- messages[i]
+			case "leave":
+				c.hub.broadcast <- messages[i]
 			default:
+				go push(c.hub.roomId, messages[i])
 				c.hub.broadcast <- messages[i]
 			}
 
 		}
 	}
+}
+
+func export(newCurrentNum int64, roomId string, message model.Message) {
+	cli := model.Pool.Get()
+	defer cli.Close()
+
+	cli.Do("SET", fmt.Sprintf("room:%s:full", roomId), message.Data)
+	cli.Do("INCRBY", fmt.Sprintf("room:%s:fullTimestamp", roomId), 300)
+}
+
+func push(roomId string, message []byte) {
+	cli := model.Pool.Get()
+	defer cli.Close()
+
+	cli.Do("INCR", fmt.Sprintf("room:%s:maxTimestamp", roomId))
+	cli.Do("RPUSH", fmt.Sprintf("room:%s:ops", roomId), message)
 }
 
 // writePump pumps messages from the hub to the websocket connection.
@@ -108,30 +150,14 @@ func (c *Client) writePump() {
 			if !ok {
 				// The hub closed the channel.
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				log.Println("c.conn.WriteMessage(websocket.CloseMessage, []byte{})")
+				//log.Println("c.conn.WriteMessage(websocket.CloseMessage, []byte{})")
 				return
 			}
-
-			w, err := c.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				return
-			}
-			w.Write(message)
-
-			// Add queued chat messages to the current websocket message.
-			//n := len(c.send)
-			//for i := 0; i < n; i++ {
-			//	w.Write(newline)
-			//	w.Write(<-c.send)
-			//}
-
-			if err := w.Close(); err != nil {
-				log.Println("err := w.Close()")
-				return
-			}
+			c.writeMessage(message)
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Println("err:", err)
 				return
 			}
 			//case <-alive.C:
@@ -143,33 +169,100 @@ func (c *Client) writePump() {
 	}
 }
 
-// serveWs handles websocket requests from the peer.
-func serveWs(roomId, userid string, hub *Hub, c *gin.Context) {
+func (c *Client) writeMessage(message []byte) {
+	w, err := c.conn.NextWriter(websocket.TextMessage)
+	if err != nil {
+		log.Println("err:", err)
+		return
+	}
+	w.Write(message)
+
+	// Add queued chat messages to the current websocket message.
+	//n := len(c.send)
+	//for i := 0; i < n; i++ {
+	//	w.Write(newline)
+	//	w.Write(<-c.send)
+	//}
+
+	if err := w.Close(); err != nil {
+		log.Println("err := w.Close()")
+		return
+	}
+}
+
+func (c *Client) reproduce(roomId string) {
 	cli := model.Pool.Get()
 	defer cli.Close()
 
+	fullFrame, _ := redis.Bytes(cli.Do("GET", fmt.Sprintf("room:%s:full", roomId)))
+
+	if fullFrame == nil {
+		log.Println("no full frame yet")
+	} else {
+		message := model.Message{
+			RoomId:    c.hub.roomId,
+			UserId:    c.id,
+			Operation: "full-frame",
+			Data:      fullFrame,
+		}
+		message1, _ := jsoniter.Marshal(message)
+		c.writeMessage(message1)
+	}
+
+	incrFrames, err := redis.ByteSlices(cli.Do("LRANGE", fmt.Sprintf("room:%s:ops", roomId), c.hub.OpCurrentNum, c.hub.OpMaxNum))
+
+	if err != nil {
+		log.Println("get incre frame err:", err)
+	} else {
+		for i := 0; i < len(incrFrames); i++ {
+			c.writeMessage(incrFrames[i])
+		}
+	}
+}
+
+// serveWs handles websocket requests from the peer.
+func serveWs(roomId, userid string, hub *Hub, c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	//cli.Do("SETNX", fmt.Sprintf("room:%s:mode", roomId), "1")
 	client := &Client{id: userid, start: time.Now(), hub: hub, conn: conn, send: make(chan []byte, 256)}
 	client.hub.clients[client] = true
-	owner, _ := cli.Do("GET", fmt.Sprintf("room:%s", roomId))
-	if owner == nil {
-		c.JSON(500, HttpMessage{
-			Code:    "-1",
-			Message: "This Room is not Created!",
-			Data:    nil,
-		})
+	failed := false
+	go func() {
+		cli := model.Pool.Get()
+		defer cli.Close()
+
+		owner, _ := redis.String(cli.Do("GET", fmt.Sprintf("room:%s", roomId)))
+
+		if owner == "" {
+			failed = true
+			c.JSON(500, HttpMessage{
+				Code:    "-1",
+				Message: "This Room is not Created!",
+				Data:    nil,
+			})
+			return
+		}
+		log.Println(fmt.Sprintf("room %s owner %s", roomId, owner))
+		client.hub.owner = owner
+		wg.Done()
+	}()
+	wg.Wait()
+	if failed == true {
+		roomMutexes[hub.roomId].Unlock()
 		return
 	}
-	log.Println(fmt.Sprintf("room %s owner %s", roomId, string(owner.([]byte))))
-	client.hub.owner = string(owner.([]byte))
 	roomMutexes[hub.roomId].Unlock()
 
 	// Allow collection of memory referenced by the caller by doing all work in
 	// new goroutines.
+	go client.reproduce(roomId)
 	go client.writePump()
 	go client.readPump()
 }

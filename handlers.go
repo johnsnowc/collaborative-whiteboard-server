@@ -6,6 +6,7 @@ import (
 	"fmt"
 	jwtgo "github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
+	"github.com/gomodule/redigo/redis"
 	"log"
 	"math/rand"
 	"net/http"
@@ -33,19 +34,36 @@ func CreateRoom(c *gin.Context) {
 	cli := model.Pool.Get()
 	defer cli.Close()
 
-	userId, _ := c.Get("username")
+	username, _ := c.Get("username")
 	rand.Seed(time.Now().Unix())
 	rid := ""
 	for i := 0; i < 10; i++ {
 		rid += strconv.Itoa(rand.Intn(10))
 	}
-	cli.Do("SET", fmt.Sprintf("room:%s", rid), userId)
-	cli.Do("SADD", fmt.Sprintf("user:%s:rooms", userId), rid)
+	cli.Do("SET", fmt.Sprintf("room:%s", rid), username)
+	//cli.Do("SET", fmt.Sprintf("room:%s:mode", rid), "1")
+	cli.Do("SADD", fmt.Sprintf("user:%s:rooms", username), rid)
 
 	c.JSON(200, HttpMessage{
 		Code:    "0",
 		Message: "Create Room Success!",
 		Data:    gin.H{"roomId": rid},
+	})
+
+}
+
+func GetRooms(c *gin.Context) {
+	cli := model.Pool.Get()
+	defer cli.Close()
+
+	userId, _ := c.Get("username")
+	rooms, _ := redis.Strings(cli.Do("SMEMBERS", fmt.Sprintf("user:%s:rooms", userId)))
+	c.JSON(http.StatusOK, HttpMessage{
+		Code:    "0",
+		Message: "Get Rooms Success",
+		Data: gin.H{
+			"rooms": rooms,
+		},
 	})
 
 }
@@ -63,6 +81,7 @@ func RoomHandler(c *gin.Context) {
 	}
 	mutexForRoomMutexes.Unlock()
 	room, ok := house.Load(roomId)
+	log.Println(room, ok)
 	var hub *Hub
 	if ok {
 		hub = room.(*Hub)
@@ -155,13 +174,39 @@ func IsRoomExist(c *gin.Context) {
 	})
 }
 
+func IsOwner(c *gin.Context) {
+	cli := model.Pool.Get()
+	defer cli.Close()
+
+	roomId := c.Param("roomId")
+	currentUser, _ := c.Get("username")
+	user, _ := redis.String(cli.Do("GET", fmt.Sprintf("room:%s", roomId)))
+	if currentUser != user {
+		c.JSON(http.StatusOK, HttpMessage{
+			Code:    "-1",
+			Message: "This User is not Owner",
+			Data: gin.H{
+				"isOwner": false,
+			},
+		})
+	} else {
+		c.JSON(http.StatusOK, HttpMessage{
+			Code:    "0",
+			Message: "This User is Owner",
+			Data: gin.H{
+				"isOwner": true,
+			},
+		})
+	}
+}
+
 func DeleteRoom(c *gin.Context) {
 	cli := model.Pool.Get()
 	defer cli.Close()
 
 	currentUser, _ := c.Get("username")
 	roomId := c.Param("roomId")
-	res, err := cli.Do("EXISTS", fmt.Sprintf("room:%s", roomId))
+	res, err := redis.Int64(cli.Do("EXISTS", fmt.Sprintf("room:%s", roomId)))
 	if err != nil {
 		c.JSON(http.StatusOK, HttpMessage{
 			Code:    "-1",
@@ -170,7 +215,7 @@ func DeleteRoom(c *gin.Context) {
 		})
 		return
 	}
-	if res.(int64) == 0 {
+	if res == 0 {
 		c.JSON(http.StatusOK, HttpMessage{
 			Code:    "-1",
 			Message: "Room not Exist",
@@ -178,12 +223,12 @@ func DeleteRoom(c *gin.Context) {
 		})
 		return
 	}
-	owner, _ := cli.Do("GET", fmt.Sprintf("room:%s", roomId))
+	owner, _ := redis.String(cli.Do("GET", fmt.Sprintf("room:%s", roomId)))
 	log.Println("current user:", currentUser)
-	log.Println("room owner:", string(owner.([]byte)))
-	if currentUser == string(owner.([]byte)) {
+	log.Println("room owner:", owner)
+	if currentUser == owner {
 		cli.Do("DEL", fmt.Sprintf("room:%s", roomId))
-		cli.Do("SREM", fmt.Sprintf("user:%s:rooms", string(owner.([]byte))), roomId)
+		cli.Do("SREM", fmt.Sprintf("user:%s:rooms", owner), roomId)
 		c.JSON(http.StatusOK, HttpMessage{
 			Code:    "0",
 			Message: "Delete Success",
@@ -223,15 +268,15 @@ func generateToken(c *gin.Context, user model.User) {
 		})
 		return
 	}
-	rooms, _ := cli.Do("SMEMBERS", fmt.Sprintf("user:%s:rooms", user.Username))
-	id, _ := cli.Do("Get", fmt.Sprintf("user:%s:id", user.Username))
+	rooms, _ := redis.Strings(cli.Do("SMEMBERS", fmt.Sprintf("user:%s:rooms", user.Username)))
+	id, _ := redis.String(cli.Do("Get", fmt.Sprintf("user:%s:id", user.Username)))
 	c.JSON(http.StatusOK, HttpMessage{
 		Code:    "0",
 		Message: "Login Successful!",
 		Data: gin.H{
 			"id":    id,
 			"token": token,
-			"rooms": rooms.([]interface{}),
+			"rooms": rooms,
 		},
 	})
 	return
