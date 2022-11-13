@@ -2,11 +2,15 @@
 
 一个可以多人协作的白板的后端服务
 
-前端地址：https://github.com/xcm1115/collaborative-whiteboard
+前端仓库：https://github.com/xcm1115/collaborative-whiteboard
+
+#### 体验地址
+
+https://collaborative-whiteboard.netlify.app/
 
 #### 项目文档
 
-https://srx08udq9u.feishu.cn/docx/XRj3dgsHVoKXLFxukpJcG8vknrc
+详情请见飞书文档https://srx08udq9u.feishu.cn/docx/XRj3dgsHVoKXLFxukpJcG8vknrc
 
 架构设计见doc
 
