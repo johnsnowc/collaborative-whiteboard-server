@@ -1,22 +1,18 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"github.com/gomodule/redigo/redis"
 	"testing"
 )
 
 func TestName(t *testing.T) {
-	cli, _ := redis.Dial("tcp", "127.0.0.1:6379")
+	cli, _ := redis.Dial("tcp", "101.133.131.188:6379")
 	defer cli.Close()
 
-	id, _ := cli.Do("GET", fmt.Sprintf("user:%s:id", "johnsnowc1"))
-	fmt.Println(id)
+	ops, _ := redis.Strings(cli.Do("LRANGE", fmt.Sprintf("room:%s:ops", "5300374513"), 0, 3))
+	for i := 0; i < len(ops); i++ {
+		fmt.Println(ops[i])
+	}
 
-	bytesBuffer := bytes.NewBuffer(id.([]byte))
-	var full1 string
-	binary.Read(bytesBuffer, binary.LittleEndian, &full1)
-	fmt.Println(full1)
 }

@@ -30,13 +30,13 @@ func newHub(roomId string) *Hub {
 	if err != nil {
 		log.Println(err)
 	}
-	log.Println(fmt.Sprintf("room: %s , maxTimeStamp: %d", roomId, max))
+	log.Println(fmt.Sprintf("room: %s , maxTimestamp: %d", roomId, max))
 
 	full, err := redis.Int64(cli.Do("GET", fmt.Sprintf("room:%s:fullTimestamp", roomId)))
 	if err != nil {
 		log.Println(err)
 	}
-	log.Println(fmt.Sprintf("room: %s , fullTimeStamp: %d", roomId, full))
+	log.Println(fmt.Sprintf("room: %s , fullTimestamp: %d", roomId, full))
 
 	return &Hub{
 		OpMaxNum:     max,

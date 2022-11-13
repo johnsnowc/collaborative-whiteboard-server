@@ -183,7 +183,7 @@ func IsOwner(c *gin.Context) {
 	user, _ := redis.String(cli.Do("GET", fmt.Sprintf("room:%s", roomId)))
 	if currentUser != user {
 		c.JSON(http.StatusOK, HttpMessage{
-			Code:    "-1",
+			Code:    "0",
 			Message: "This User is not Owner",
 			Data: gin.H{
 				"isOwner": false,

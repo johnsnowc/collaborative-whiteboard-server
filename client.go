@@ -27,7 +27,7 @@ const (
 	pingPeriod = (pongWait * 9) / 10
 
 	// Maximum message size allowed from peer.
-	maxMessageSize = 1024
+	maxMessageSize = 1000000
 )
 
 var (
@@ -36,8 +36,8 @@ var (
 )
 
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+	ReadBufferSize:  1000000,
+	WriteBufferSize: 1000000,
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
@@ -79,26 +79,11 @@ func (c *Client) readPump() {
 		messages := bytes.Split(message, newline)
 		for i := 0; i < len(messages); i++ {
 
-			newMaxNum := atomic.AddInt64(&c.hub.OpMaxNum, 1)
-			var newCurrentNum int64
-			if newMaxNum > 0 && newMaxNum%300 == 0 {
-				exportMessage := model.Message{
-					RoomId:    c.hub.roomId,
-					UserId:    c.id,
-					Operation: "export",
-					Data:      nil,
-				}
-				message1, _ := jsoniter.Marshal(exportMessage)
-				c.writeMessage(message1)
-
-				newCurrentNum = atomic.AddInt64(&c.hub.OpCurrentNum, 300)
-			}
-
 			var ms model.Message
 			_ = jsoniter.Unmarshal(messages[i], &ms)
 			switch ms.Operation {
 			case "export":
-				go export(newCurrentNum, c.hub.roomId, ms)
+				go export(c.hub.roomId, ms)
 			//case "keep-alive":
 			//	c.start = time.Now()
 			case "join":
@@ -106,6 +91,17 @@ func (c *Client) readPump() {
 			case "leave":
 				c.hub.broadcast <- messages[i]
 			default:
+				newMaxNum := atomic.AddInt64(&c.hub.OpMaxNum, 1)
+				if newMaxNum > 0 && newMaxNum%100 == 0 {
+					exportMessage := model.Message{
+						RoomId:    c.hub.roomId,
+						UserId:    c.id,
+						Operation: "export",
+						Data:      nil,
+					}
+					message1, _ := jsoniter.Marshal(exportMessage)
+					c.writeMessage(message1)
+				}
 				go push(c.hub.roomId, messages[i])
 				c.hub.broadcast <- messages[i]
 			}
@@ -114,12 +110,12 @@ func (c *Client) readPump() {
 	}
 }
 
-func export(newCurrentNum int64, roomId string, message model.Message) {
+func export(roomId string, message model.Message) {
 	cli := model.Pool.Get()
 	defer cli.Close()
 
 	cli.Do("SET", fmt.Sprintf("room:%s:full", roomId), message.Data)
-	cli.Do("INCRBY", fmt.Sprintf("room:%s:fullTimestamp", roomId), 300)
+	cli.Do("INCRBY", fmt.Sprintf("room:%s:fullTimestamp", roomId), 100)
 }
 
 func push(roomId string, message []byte) {
@@ -175,7 +171,12 @@ func (c *Client) writeMessage(message []byte) {
 		log.Println("err:", err)
 		return
 	}
-	w.Write(message)
+	nums, err := w.Write(message)
+	if err != nil {
+		log.Println(err)
+	} else {
+		log.Println(nums)
+	}
 
 	// Add queued chat messages to the current websocket message.
 	//n := len(c.send)
@@ -199,6 +200,7 @@ func (c *Client) reproduce(roomId string) {
 	if fullFrame == nil {
 		log.Println("no full frame yet")
 	} else {
+		log.Println("full frame:", fullFrame)
 		message := model.Message{
 			RoomId:    c.hub.roomId,
 			UserId:    c.id,
@@ -210,10 +212,11 @@ func (c *Client) reproduce(roomId string) {
 	}
 
 	incrFrames, err := redis.ByteSlices(cli.Do("LRANGE", fmt.Sprintf("room:%s:ops", roomId), c.hub.OpCurrentNum, c.hub.OpMaxNum))
-
+	log.Println(c.hub.OpCurrentNum, c.hub.OpMaxNum)
 	if err != nil {
 		log.Println("get incre frame err:", err)
 	} else {
+		log.Println("incr frame nums:", len(incrFrames))
 		for i := 0; i < len(incrFrames); i++ {
 			c.writeMessage(incrFrames[i])
 		}
